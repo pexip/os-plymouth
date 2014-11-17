@@ -25,6 +25,7 @@
 #include "ply-key-file.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -60,6 +61,13 @@ struct _ply_key_file
   ply_hashtable_t *groups;
 };
 
+typedef struct
+{
+  ply_key_file_foreach_func_t *func;
+  void                        *user_data;
+  char                        *group_name;
+} ply_key_file_foreach_func_data_t;
+
 static bool ply_key_file_open_file (ply_key_file_t *key_file);
 static void ply_key_file_close_file (ply_key_file_t *key_file);
 
@@ -68,7 +76,7 @@ ply_key_file_open_file (ply_key_file_t *key_file)
 {
   assert (key_file != NULL);
 
-  key_file->fp = fopen (key_file->filename, "r");
+  key_file->fp = fopen (key_file->filename, "re");
 
   if (key_file->fp == NULL)
     {
@@ -166,13 +174,18 @@ ply_key_file_load_group (ply_key_file_t *key_file,
       ply_key_file_entry_t *entry;
       char *key;
       char *value;
-      long offset;
+      off_t offset;
       int first_byte;
 
       key = NULL;
       value = NULL;
 
-      first_byte = fgetc (key_file->fp);
+      do
+        {
+          first_byte = fgetc (key_file->fp);
+        }
+      while (isspace (first_byte));
+
       if (first_byte == '#')
         {
           char *line_to_toss;
@@ -189,13 +202,13 @@ ply_key_file_load_group (ply_key_file_t *key_file,
         }
       ungetc (first_byte, key_file->fp);
 
-      offset = ftell (key_file->fp);
-      items_matched = fscanf (key_file->fp, " %a[^= \t\n] = %a[^\n] ", &key, &value);
+      offset = ftello (key_file->fp);
+      items_matched = fscanf (key_file->fp, " %m[^= \t\n] = %m[^\n] ", &key, &value);
 
       if (items_matched != 2)
         {
           if (items_matched == 1)
-            fseek (key_file->fp, offset, SEEK_SET);
+            fseeko (key_file->fp, offset, SEEK_SET);
 
           free (key);
           free (value);
@@ -218,12 +231,12 @@ static bool
 ply_key_file_load_groups (ply_key_file_t *key_file)
 {
   int items_matched;
-  char *group_name;
   bool added_group = false;
   bool has_comments = false;
-  
+
   do
     {
+      char *group_name;
       int first_byte;
 
       ply_key_file_group_t *group;
@@ -246,7 +259,8 @@ ply_key_file_load_groups (ply_key_file_t *key_file)
         }
       ungetc (first_byte, key_file->fp);
 
-      items_matched = fscanf (key_file->fp, " [ %a[^]] ] ", &group_name);
+      group_name = NULL;
+      items_matched = fscanf (key_file->fp, " [ %m[^]] ] ", &group_name);
 
       if (items_matched <= 0)
         {
@@ -255,6 +269,7 @@ ply_key_file_load_groups (ply_key_file_t *key_file)
           break;
         }
 
+      assert (group_name != NULL);
       group = ply_key_file_load_group (key_file, group_name);
 
       free (group_name);
@@ -355,6 +370,54 @@ ply_key_file_get_value (ply_key_file_t *key_file,
     }
 
   return strdup (entry->value);
+}
+
+static void
+ply_key_file_foreach_entry_entries (void *key,
+                                    void *data,
+                                    void *user_data)
+{
+  ply_key_file_entry_t *entry;
+  ply_key_file_foreach_func_data_t *func_data;
+
+  func_data = user_data;
+  entry = data;
+
+  func_data->func(func_data->group_name,
+                  entry->key,
+                  entry->value,
+                  func_data->user_data);
+}
+
+static void
+ply_key_file_foreach_entry_groups (void *key,
+                                   void *data,
+                                   void *user_data)
+{
+  ply_key_file_group_t *group;
+  ply_key_file_foreach_func_data_t *func_data;
+
+  func_data = user_data;
+  group = data;
+  func_data->group_name = group->name;
+
+  ply_hashtable_foreach (group->entries,
+                         ply_key_file_foreach_entry_entries,
+                         func_data);
+}
+
+void
+ply_key_file_foreach_entry (ply_key_file_t              *key_file,
+                            ply_key_file_foreach_func_t  func,
+                            void                        *user_data)
+{
+  ply_key_file_foreach_func_data_t func_data;
+
+  func_data.func = func;
+  func_data.user_data = user_data;
+  ply_hashtable_foreach (key_file->groups,
+                         ply_key_file_foreach_entry_groups,
+                         &func_data);
 }
 
 /* vim: set ts=4 sw=4 expandtab autoindent cindent cino={.5s,(0: */
