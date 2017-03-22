@@ -79,6 +79,7 @@ struct _ply_boot_splash_plugin
   char *script_filename;
   char *image_dir;
 
+  ply_list_t                    *script_env_vars;
   script_op_t                   *script_main_op;
 
   script_state_t                *script_state;
@@ -90,6 +91,12 @@ struct _ply_boot_splash_plugin
 
   uint32_t is_animating : 1;
 };
+
+typedef struct 
+{
+  char *key;
+  char *value;
+} script_env_var_t;
 
 static void detach_from_event_loop (ply_boot_splash_plugin_t *plugin);
 static void stop_animation (ply_boot_splash_plugin_t *plugin);
@@ -138,6 +145,26 @@ unpause_displays (ply_boot_splash_plugin_t *plugin)
     }
 }
 
+static void 
+add_script_env_var (const char *group_name,
+                    const char *key,
+                    const char *value,
+                    void       *user_data)
+{
+  ply_list_t *script_env_vars;
+  script_env_var_t *new_env_var;
+
+  if (strcmp (group_name, "script-env-vars") != 0)
+    return;
+
+  script_env_vars = user_data;
+  new_env_var = malloc (sizeof (script_env_var_t));
+  new_env_var->key = strdup (key);
+  new_env_var->value = strdup (value);
+
+  ply_list_append_data (script_env_vars, new_env_var);
+}
+
 static ply_boot_splash_plugin_t *
 create_plugin (ply_key_file_t *key_file)
 {
@@ -149,6 +176,10 @@ create_plugin (ply_key_file_t *key_file)
   plugin->script_filename = ply_key_file_get_value (key_file,
                                                     "script",
                                                     "ScriptFile");
+
+  plugin->script_env_vars = ply_list_new ();
+  ply_key_file_foreach_entry (key_file, add_script_env_var, plugin->script_env_vars);
+
   plugin->displays = ply_list_new ();
   return plugin;
 }
@@ -156,6 +187,9 @@ create_plugin (ply_key_file_t *key_file)
 static void
 destroy_plugin (ply_boot_splash_plugin_t *plugin)
 {
+  ply_list_node_t *node;
+  script_env_var_t *env_var;
+
   if (plugin == NULL)
     return;
 
@@ -169,6 +203,16 @@ destroy_plugin (ply_boot_splash_plugin_t *plugin)
       detach_from_event_loop (plugin);
     }
 
+  for (node = ply_list_get_first_node (plugin->script_env_vars);
+       node != NULL;
+       node = ply_list_get_next_node (plugin->script_env_vars, node))
+    {
+      env_var = ply_list_node_get_data (node);
+      free (env_var->key);
+      free (env_var->value);
+      free (env_var);
+    }
+  ply_list_free (plugin->script_env_vars);
   free (plugin->script_filename);
   free (plugin->image_dir);
   free (plugin);
@@ -208,9 +252,26 @@ on_boot_progress (ply_boot_splash_plugin_t *plugin,
 static bool
 start_script_animation (ply_boot_splash_plugin_t *plugin)
 {
+  ply_list_node_t *node;
+  script_obj_t *target_obj;
+  script_obj_t *value_obj;
+  script_env_var_t *env_var;
+  
   assert (plugin != NULL);
 
   plugin->script_state = script_state_new (plugin);
+  
+  for (node = ply_list_get_first_node (plugin->script_env_vars);
+       node != NULL;
+       node = ply_list_get_next_node (plugin->script_env_vars, node))
+    {
+      env_var = ply_list_node_get_data (node);
+      target_obj = script_obj_hash_get_element (plugin->script_state->global,
+                                                env_var->key);
+      value_obj = script_obj_new_string (env_var->value);
+      script_obj_assign (target_obj, value_obj);
+    }
+  
   plugin->script_image_lib = script_lib_image_setup (plugin->script_state,
                                                      plugin->image_dir);
   plugin->script_sprite_lib = script_lib_sprite_setup (plugin->script_state,
@@ -295,13 +356,6 @@ stop_animation (ply_boot_splash_plugin_t *plugin)
 }
 
 static void
-on_interrupt (ply_boot_splash_plugin_t *plugin)
-{
-  ply_event_loop_exit (plugin->loop, 1);
-  stop_animation (plugin);
-}
-
-static void
 detach_from_event_loop (ply_boot_splash_plugin_t *plugin)
 {
   plugin->loop = NULL;
@@ -370,11 +424,6 @@ show_splash_screen (ply_boot_splash_plugin_t *plugin,
   ply_event_loop_watch_for_exit (loop, (ply_event_loop_exit_handler_t)
                                  detach_from_event_loop,
                                  plugin);
-
-  ply_event_loop_watch_signal (plugin->loop,
-                               SIGINT,
-                               (ply_event_handler_t)
-                               on_interrupt, plugin);
 
   ply_trace ("starting boot animation");
   return start_animation (plugin);
@@ -461,9 +510,20 @@ display_message (ply_boot_splash_plugin_t *plugin,
                  const char               *message)
 {
   pause_displays (plugin);
-  script_lib_plymouth_on_message (plugin->script_state,
-                                  plugin->script_plymouth_lib,
-                                  message);
+  script_lib_plymouth_on_display_message (plugin->script_state,
+                                          plugin->script_plymouth_lib,
+                                          message);
+  unpause_displays (plugin);
+}
+
+static void
+hide_message (ply_boot_splash_plugin_t *plugin,
+                 const char               *message)
+{
+  pause_displays (plugin);
+  script_lib_plymouth_on_hide_message (plugin->script_state,
+                                       plugin->script_plymouth_lib,
+                                       message);
   unpause_displays (plugin);
 }
 
@@ -488,6 +548,7 @@ ply_boot_splash_plugin_get_interface (void)
     .display_password = display_password,
     .display_question = display_question,
     .display_message = display_message,
+    .hide_message = hide_message,
   };
 
   return &plugin_interface;

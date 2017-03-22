@@ -1,88 +1,91 @@
 #!/usr/bin/make -f
-%:
-	dh $@
-
-
-CFLAGS = -Wall -g
-LDFLAGS = -Wl,--as-needed
 
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
-# Disable optimisations if noopt found in $DEB_BUILD_OPTIONS
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -O0
-	LDFLAGS += -Wl,-O0
-else
-	CFLAGS += -O2
-	LDFLAGS += -Wl,-O1
-endif
+# Ensure at build time that the library has no dependencies on undefined
+# symbols, and speed up loading.
+export DEB_LDFLAGS_MAINT_APPEND=-Wl,-z,defs -Wl,-O1 -Wl,--as-needed
 
-# This renderer is only available on architectures that are sufficiently
-# PC-like
-ifneq (,$(filter $(DEB_HOST_ARCH),amd64 armel i386 ia64))
-	VGA_RENDERER=lib/plymouth/renderers/vga16fb.so
-endif
-
-ifneq (,$(filter $(DEB_HOST_ARCH),amd64 i386))
-	INTEL_CONFFLAGS=--enable-libdrm_intel
-else
-	INTEL_CONFFLAGS=--disable-libdrm_intel
-endif
-
-override_dh_auto_configure:
-	dh_auto_configure -- CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" \
-		--libdir=/lib \
-		--datadir=/lib \
-		--enable-tracing \
-		--disable-tests \
-		--disable-maintainer-mode \
-		--disable-gdm-transition \
-		--with-system-root-install \
-		--without-rhgb-compat-link \
-		--without-gdm-autostart-file \
-		--without-default-plugin   \
-		--with-logo=/lib/plymouth/ubuntu_logo.png \
-		--with-background-color=0x2c001e \
-		--with-background-start-color-stop=0x2c001e \
-		--with-background-end-color-stop=0x2c001e \
-		--with-boot-tty=/dev/tty7 \
-		--with-shutdown-tty=/dev/tty7 \
-		--enable-upstart-monitoring \
-		$(INTEL_CONFFLAGS)
-
-override_dh_auto_install:
-	dh_auto_install
-	mkdir -p debian/tmp/usr/share/apport/package-hooks
-	install -m 644 debian/libplymouth2.apport debian/tmp/usr/share/apport/package-hooks/source_plymouth.py
-
-override_dh_install:
-	sed -e'/frame-buffer\.so$$/a\
-$(VGA_RENDERER)' < debian/plymouth.install.in > debian/plymouth.install
-	dh_install
-	sed -i -e's/#DEB_HOST_MULTIARCH#/$(DEB_HOST_MULTIARCH)/g' \
-		debian/plymouth/usr/share/initramfs-tools/hooks/plymouth
+%:
+	dh ${@} --parallel --with autoreconf,systemd
 
 override_dh_auto_clean:
 	dh_auto_clean
-	rm -f debian/plymouth.install
 
-# Don't start plymouth when installing!
+	rm -f build-tools/config.guess build-tools/config.sub
+
+override_dh_auto_configure:
+	cp -f /usr/share/misc/config.guess build-tools
+	cp -f /usr/share/misc/config.sub build-tools
+
+	dh_auto_configure -- \
+		--disable-silent-rules \
+		--prefix=/usr \
+		--localstatedir=/var \
+		--enable-pango \
+		--enable-systemd-integration \
+		--enable-static \
+		--enable-tracing \
+		--disable-gdm-transition \
+		--with-background-color=0x005a8a \
+		--with-gdm-autostart-file \
+		--with-log-viewer \
+		--with-logo=/usr/share/plymouth/debian-logo.png \
+		--with-release-file=/etc/os-release \
+		--with-system-root-install \
+		--without-rhgb-compat-link \
+		--with-boot-tty=/dev/tty7 \
+		--with-shutdown-tty=/dev/tty7
+
+override_dh_auto_install:
+	dh_auto_install
+
+	rm -f debian/tmp/lib/$(DEB_HOST_MULTIARCH)/*.la
+	rm -f debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/*.la
+	rm -f debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/plymouth/*.la
+	rm -f debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/plymouth/*/*.la
+
+override_dh_builddeb:
+	dh_builddeb -- -Zxz
+
+override_dh_install:
+	# Moving /usr/lib to /lib
+	mv debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/*.so.* debian/tmp/lib/$(DEB_HOST_MULTIARCH)
+
+	dh_install --fail-missing
+
+	# Adding initramfs-tools integration
+	install -D -m 0755 debian/local/plymouth.hook debian/plymouth/usr/share/initramfs-tools/hooks/plymouth
+	sed -i -e 's|@DEB_HOST_MULTIARCH@|$(DEB_HOST_MULTIARCH)|g' debian/plymouth/usr/share/initramfs-tools/hooks/plymouth
+	install -D -m 0755 debian/local/plymouth.init-premount debian/plymouth/usr/share/initramfs-tools/scripts/init-premount/plymouth
+	install -D -m 0755 debian/local/plymouth.init-bottom debian/plymouth/usr/share/initramfs-tools/scripts/init-bottom/plymouth
+
+	# Adding other debian specific files
+	install -D -m 0644 debian/local/debian-logo.png debian/plymouth/usr/share/plymouth/debian-logo.png
+	install -D -m 0755 debian/local/plymouth-update-initrd debian/plymouth/usr/lib/$(DEB_HOST_MULTIARCH)/plymouth/plymouth-update-initrd
+	install -D -m 0644 debian/local/plymouth.lsb debian/plymouth/lib/lsb/init-functions.d/99-plymouth
+
+override_dh_systemd_start:
+	dh_systemd_start --no-start
+
+override_dh_autoreconf:
+	dh_autoreconf --as-needed
+
 override_dh_installinit:
-	dh_installinit --noscripts
-	dh_installinit --name=plymouth-log --noscripts
-	dh_installinit --name=plymouth-splash --noscripts
-	dh_installinit --name=plymouth-stop --noscripts
-	dh_installinit --name=plymouth-upstart-bridge --noscripts
-	dh_installinit --name=plymouth-ready --noscripts
+	dh_installinit --no-start -- start . 2 3 4 5 . stop . 0 6 .
+	dh_installinit --no-start --name=plymouth-log -- start . S .
 
-# Make the initramfs scripts executable
-override_dh_fixperms:
-	dh_fixperms
-	chmod 755 debian/plymouth/usr/share/initramfs-tools/hooks/plymouth
-	chmod 755 debian/plymouth/usr/share/initramfs-tools/scripts/init-top/plymouth
-	chmod 755 debian/plymouth/usr/share/initramfs-tools/scripts/init-bottom/plymouth
-	chmod 755 debian/plymouth/usr/share/initramfs-tools/scripts/panic/plymouth
+override_dh_link:
+	# correcting symlink targets
+	for LIB in debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/*.so; \
+	do \
+		dh_link -pplymouth-dev lib/$(DEB_HOST_MULTIARCH)/$$(basename $$(readlink $${LIB})) usr/lib/$(DEB_HOST_MULTIARCH)/$$(basename $${LIB}); \
+	done
 
-# Don't generate shlibs for plugins (ideally these wouldn't have a SONAME)
+	dh_link --remaining-packages
+
 override_dh_makeshlibs:
-	dh_makeshlibs -X/lib/plymouth/
+	dh_makeshlibs -Xusr/lib/$(DEB_HOST_MULTIARCH)/plymouth
+
+override_dh_strip:
+	dh_strip --dbg-package=plymouth-dbg
