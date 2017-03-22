@@ -7,7 +7,7 @@ XSBC-Pexip-Original-Uploaders: Sjoerd Simons <sjoerd@debian.org>
 Build-Depends:
  debhelper (>= 9),
  dh-autoreconf,
- dh-systemd,
+# dh-systemd,
  docbook-xsl,
  libdrm-dev,
  libgtk2.0-dev,
@@ -15,7 +15,7 @@ Build-Depends:
  libpng-dev,
  libudev-dev,
  pkg-config,
- systemd,
+# systemd,
  xsltproc,
 Standards-Version: 3.9.6
 Homepage: http://www.freedesktop.org/wiki/Software/Plymouth
