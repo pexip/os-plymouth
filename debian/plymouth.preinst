@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "install" ] || [ "$1" = "upgrade" ]; then
+    for item in /etc/init.d/plymouth /etc/init.d/plymouth-log
+    do
+        if [ -e "$item" ] && [ -L "$item" ] && [ $(readlink -f "$item") = "/lib/init/upstart-job" ]; then
+            rm -f "$item"
+        fi
+    done
+fi
+
+#DEBHELPER#

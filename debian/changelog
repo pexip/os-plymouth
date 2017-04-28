@@ -1,6 +1,8 @@
 plymouth (0.9.0-9pexip1) pexip; urgency=low
 
   * Migrate to Jessie
+  * debian/plymouth.preinst: Prepare transition of
+    /etc/init.d/plymouth(-log) from symlink to conffile
 
  -- John-Mark Bell <jmb@pexip.com>  Wed, 22 Mar 2017 19:11:48 +0000
 
