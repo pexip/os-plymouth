@@ -15,6 +15,6 @@ diff -Naurp plymouth.orig/src/plymouthd.defaults plymouth/src/plymouthd.defaults
 @@ -2,4 +2,4 @@
  # upgrades.
  [Daemon]
- Theme=text
+ Theme=details
 -ShowDelay=5
 +ShowDelay=0

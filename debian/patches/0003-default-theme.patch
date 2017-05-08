@@ -17,5 +17,5 @@ diff -Naurp plymouth.orig/src/plymouthd.defaults plymouth/src/plymouthd.defaults
  # upgrades.
  [Daemon]
 -Theme=spinner
-+Theme=text
++Theme=details
  ShowDelay=5
