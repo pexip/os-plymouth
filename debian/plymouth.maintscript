@@ -1,0 +1,2 @@
+rm_conffile /etc/init/plymouth-ready.conf 0.9.0-9pexip2
+rm_conffile /etc/init/plymouth-splash.conf 0.9.0-9pexip2
