@@ -1,2 +1,6 @@
 rm_conffile /etc/init/plymouth-ready.conf 0.9.0-9pexip2
 rm_conffile /etc/init/plymouth-splash.conf 0.9.0-9pexip2
+rm_conffile /etc/init/plymouth.conf 0.9.0-9pexip4
+rm_conffile /etc/init/plymouth-log.conf 0.9.0-9pexip4
+rm_conffile /etc/init/plymouth-stop.conf 0.9.0-9pexip4
+rm_conffile /etc/init/plymouth-upstart-bridge.conf 0.9.0-9pexip4

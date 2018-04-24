@@ -1,6 +1,0 @@
-start on (stopped rc RUNLEVEL=[2345] or starting rcS)
-stop on stopped plymouth
-
-pre-start script
-    exec /bin/plymouth quit
-end script
